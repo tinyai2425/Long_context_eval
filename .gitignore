@@ -1,0 +1,15 @@
+Data_set/*
+!Data_set/README.md
+Model_file/*
+!Model_file/README.md
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+*.xlsx
+*.png
+tmp_*.json
+tmp_*.raw
+tmp_req.json
+tmp_response.json
+tmp_response.raw
