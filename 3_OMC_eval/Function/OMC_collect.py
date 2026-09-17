@@ -38,6 +38,44 @@ def convert_to_ms(value: float, unit: str) -> float:
     return value
 
 
+def sanitize_all_generation(all_gen, curr_gen=""):
+    """去掉 OMC 写 all generation 时多打在全文末尾的 '.'。
+
+    真实输出在 curr generation 里是正常的，例如最后一行是 ``8``；
+    all generation 却变成 ``8.``。这个点不是模型 token，会让按行
+    精确匹配的 NDCG / F1 / Accuracy / SubEM 判错。
+
+    规则：若 all 相对 curr 只是末尾多一个 '.'，或 curr 不可用时
+    全文末尾仍有那个点，则剥掉恰好一个。
+    """
+    if all_gen is None:
+        all_gen = ""
+    if not all_gen:
+        return curr_gen or ""
+
+    had_nl = all_gen.endswith("\n") or all_gen.endswith("\r\n")
+    all_body = all_gen.rstrip("\r\n")
+    curr_body = (curr_gen or "").rstrip("\r\n")
+
+    if all_body.endswith("."):
+        stripped = all_body[:-1]
+        if curr_body:
+            curr_last = curr_body.rsplit("\n", 1)[-1]
+            all_last = all_body.rsplit("\n", 1)[-1]
+            extra_dot = (
+                all_body == curr_body + "."
+                or all_last == curr_last + "."
+            )
+            if extra_dot:
+                all_body = stripped
+        else:
+            all_body = stripped
+
+    if had_nl:
+        return all_body + "\n"
+    return all_body
+
+
 def parse_llm_test_results(output_path: str) -> pd.DataFrame:
     case_start_pattern = re.compile(
         r"\[(?:INFO|WARNING|ERROR|EXCEPTION)\] ## testCaseName: ([a-zA-Z0-9_\-]+), start.*"
@@ -89,7 +127,13 @@ def parse_llm_test_results(output_path: str) -> pd.DataFrame:
                         case_data["decode_time"] + case_data["first_token_time"]
                     )
 
-                    response = case_data.get("all generation", "")
+                    raw_all = case_data.get("all generation", "") or ""
+                    response = sanitize_all_generation(
+                        raw_all, case_data.get("curr generation", "") or ""
+                    )
+                    if response != raw_all:
+                        case_data["all generation raw"] = raw_all
+                        case_data["all generation"] = response
                     case_data["response"] = response
 
                     if "inputTokenCount" in case_data:

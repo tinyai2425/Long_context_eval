@@ -13,3 +13,5 @@ tmp_*.raw
 tmp_req.json
 tmp_response.json
 tmp_response.raw
+./*/*.sh
+*.txt
