@@ -35,6 +35,7 @@ def _error_result(case, exc):
         "response": "",
         "reasoning_content": "",
         "prediction": json.dumps({"error": str(exc)}, ensure_ascii=False),
+        "n_pred_lines": 0,
         "prompt_token_len": int(attached.get("prompt_token_len") or 0),
         "response_token_len": 0,
         "first_token_time": None,

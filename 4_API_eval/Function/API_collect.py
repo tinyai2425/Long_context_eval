@@ -258,6 +258,9 @@ def parse_llm_api_results(input_path: str) -> pd.DataFrame:
         case["metric"] = float(metric)
         case["correct"] = bool(passed)
         case["prediction"] = prediction
+        case["n_pred_lines"] = len(
+            [ln for ln in (prediction or "").splitlines() if ln.strip()]
+        )
         case["enable_thinking"] = req_line.get("enable_thinking")
         if isinstance(case.get("expect"), (list, dict)):
             case["expect"] = json.dumps(case["expect"], ensure_ascii=False)

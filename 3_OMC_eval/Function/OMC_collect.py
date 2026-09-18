@@ -39,6 +39,7 @@ PARQUET_KEYS = (
     "expect",
     "response",
     "prediction",
+    "n_pred_lines",
     "prompt_token_len",
     "response_token_len",
     "first_token_time",
@@ -177,6 +178,9 @@ def _finish_case(case_data, case_name):
     case_data["metric"] = float(metric)
     case_data["correct"] = bool(passed)
     case_data["prediction"] = prediction
+    case_data["n_pred_lines"] = len(
+        [ln for ln in (prediction or "").splitlines() if ln.strip()]
+    )
     case_data["benchmark"] = "LongBench-Pro"
     if isinstance(case_data.get("expect"), (list, dict)):
         case_data["expect"] = json.dumps(case_data["expect"], ensure_ascii=False)

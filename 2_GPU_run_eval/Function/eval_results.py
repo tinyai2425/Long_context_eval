@@ -43,6 +43,9 @@ def _row(df, project_name, flavor, vertical=""):
         "Test No.": len(df),
         "prompt len": round(df["prompt_token_len"].mean(), 2),
         "response len": round(df["response_token_len"].mean(), 2),
+        "pred lines": round(df["n_pred_lines"].mean(), 2)
+        if "n_pred_lines" in df.columns
+        else 0.0,
         "get_ans": round(df["get_ans"].mean(), 2) if "get_ans" in df.columns else 0.0,
         "rp>0.1": round((df["repeat"] > 0.1).mean(), 4),
         "rp@99%": round(df["repeat"].quantile(0.99), 5),

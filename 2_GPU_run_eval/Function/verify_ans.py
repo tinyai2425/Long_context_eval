@@ -380,15 +380,29 @@ def SubEM(answers, prediction):
     for a in answers:
         if a in predictions:
             score += 1.0
-    return score / len(answers)
+    value = score / len(answers)
+    return max(0.0, min(1.0, value * overgen_scale(len(answers), len(predictions))))
+
+
+def overgen_scale(n_gold, n_pred_lines):
+    """Dilute list metrics when the model dumps many more lines than asked.
+
+    Official NDCG@k / SubEM ignore extra lines (or treat them as recall-only),
+    so a quantized run that prints 1..N can beat a short, well-ranked GPU
+    answer. Scale by n_gold / n_pred when n_pred > n_gold, i.e. list precision.
+    """
+    if n_gold <= 0 or n_pred_lines <= n_gold:
+        return 1.0
+    return n_gold / float(n_pred_lines)
 
 
 def NDCG(answers, prediction):
-    """Official LongBench-Pro NDCG@k via pytrec_eval semantics (k = len(answers)).
+    """NDCG@k (k = len(answers)) with list-precision dilution.
 
-    Graded relevance is the gold rank. Dumping a permutation of the gold IDs
-    (for example 1..n) can still score high; that is the official metric, not
-    a filename/meta join artifact.
+    Core DCG matches official LongBench-Pro / pytrec_eval: graded relevance is
+    the gold rank, only the first k unique prediction lines count. Extra dump
+    lines after that are then penalized by overgen_scale, otherwise printing
+    every ID in order scores ~0.8 while a short GPU ranking scores ~0.3.
     """
     answers = normalize_answers(answers)
     predictions = normalize_prediction(prediction)
@@ -415,7 +429,7 @@ def NDCG(answers, prediction):
         idcg += rel / math.log2(i + 1)
     if idcg <= 0:
         return 0.0
-    value = dcg / idcg
+    value = (dcg / idcg) * overgen_scale(k, len(predictions))
     return max(0.0, min(1.0, value))
 
 

@@ -149,6 +149,9 @@ def measure_performance(client, model_id, case, timeout=1200):
         "response": full_response,
         "reasoning_content": reasoning_content,
         "prediction": prediction,
+        "n_pred_lines": len(
+            [ln for ln in (prediction or "").splitlines() if ln.strip()]
+        ),
         "prompt_token_len": prompt_token_len,
         "response_token_len": response_token_len,
         "first_token_time": first_token_time,
