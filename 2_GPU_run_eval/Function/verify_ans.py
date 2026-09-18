@@ -37,10 +37,28 @@ TASK_METRIC_CONFIG = {
     "T11.2 Short-Range Reference Resolution & State Query": "Accuracy",
 }
 
+PRIMARY_TASK_BY_CODE = {
+    "T1": "T1. Retrieval & Ranking",
+    "T2": "T2. Sequencing & Structure Reconstruction",
+    "T3": "T3. Evidence-Grounded QA",
+    "T4": "T4. Summarization & Synthesis",
+    "T5": "T5. Attribution & Citation Alignment",
+    "T6": "T6. Aggregation & Clustering",
+    "T7": "T7. Consistency & Compliance Checking",
+    "T8": "T8. Structured & Numeric Reasoning",
+    "T9": "T9. Version & Code Diff Analysis",
+    "T10": "T10. Rule Induction & In-Context Learning",
+    "T11": "T11. Dialogue Memory & Long-Horizon Tracking",
+}
+
+# 生成侧是 `{project}-lbp-test-{vertical}-{idx}`。project 前缀允许任意字符
+# （含点号、改过的序号），评分身份只用 flavor-test-vertical-idx。
 TEST_CASE_NAME_PATTERN = re.compile(
-    r"^(?P<project_name>[a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)*-[0-9]+)-"
-    r"(?P<flavor>[a-zA-Z0-9_]+)-test-"
-    r"(?P<vertical>[a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)*)-[0-9]+$"
+    r"^(?P<project_name>.+)-(?P<flavor>[A-Za-z0-9_]+)-test-"
+    r"(?P<vertical>.+)-(?P<index>\d+)$"
+)
+TEST_CASE_NAME_FALLBACK = re.compile(
+    r"(?:^|-)test-(?P<vertical>.+)-(?P<index>\d+)$"
 )
 
 THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -48,6 +66,16 @@ SUMMARY_PASS_THRESHOLD = 0.65
 
 _embedding_model = None
 _embedding_enabled = False
+
+
+def sanitize_task_token(value):
+    text = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(value or ""))
+    return text.strip("_") or "unknown"
+
+
+SLUG_TO_SECONDARY = {
+    sanitize_task_token(name): name for name in TASK_METRIC_CONFIG
+}
 
 
 def init_embedding(path):
@@ -70,11 +98,127 @@ def init_embedding(path):
     return True
 
 
+def parse_test_case_parts(name):
+    """Split `{project}-{flavor}-test-{vertical}-{index}`.
+
+    project 可以是 `project-1`、`project-2`、`Qwen3.5-4B` 等；评分不依赖它。
+    """
+    text = str(name or "").strip()
+    matched = TEST_CASE_NAME_PATTERN.match(text)
+    if matched:
+        return (
+            matched.group("project_name"),
+            matched.group("flavor"),
+            matched.group("vertical"),
+            int(matched.group("index")),
+        )
+    fallback = TEST_CASE_NAME_FALLBACK.search(text)
+    if fallback:
+        return "", "", fallback.group("vertical"), int(fallback.group("index"))
+    return "", "", "", None
+
+
 def parse_test_case_name(name):
-    matched = TEST_CASE_NAME_PATTERN.match(name or "")
+    project_name, flavor, vertical, _index = parse_test_case_parts(name)
+    return project_name, flavor, vertical
+
+
+def canonical_case_key(name):
+    """Stable identity: flavor-test-vertical-idx, ignoring the project prefix."""
+    project_name, flavor, vertical, index = parse_test_case_parts(name)
+    if vertical and index is not None:
+        return f"{(flavor or 'lbp').lower()}-test-{vertical}-{index}".lower()
+    text = str(name or "").strip().lower()
+    return text
+
+
+def secondary_task_from_vertical(vertical):
+    text = str(vertical or "").strip()
+    if not text:
+        return ""
+    if text in TASK_METRIC_CONFIG:
+        return text
+    return SLUG_TO_SECONDARY.get(sanitize_task_token(text), "")
+
+
+def primary_task_from_secondary(secondary_task):
+    text = str(secondary_task or "").strip()
+    if not text:
+        return ""
+    matched = re.match(r"(T\d+)", text)
     if not matched:
-        return "", "", ""
-    return matched.group("project_name"), matched.group("flavor"), matched.group("vertical")
+        return ""
+    return PRIMARY_TASK_BY_CODE.get(matched.group(1), "")
+
+
+def _blank(value):
+    if value is None:
+        return True
+    try:
+        if value != value:
+            return True
+    except Exception:
+        return True
+    text = str(value).strip()
+    return text == "" or text.lower() in ("nan", "none", "<na>")
+
+
+def infer_language(*texts):
+    blob = " ".join(str(t or "") for t in texts)
+    if re.search(r"[\u4e00-\u9fff]", blob):
+        return "Chinese"
+    return "English"
+
+
+def attach_task_fields(case):
+    """Fill project/flavor/vertical/tasks from the case itself.
+
+    GPU/API jsonl already carry labels. OMC logs carry expect + testCaseName;
+    the vertical slug in the name is enough to pick NDCG/F1/Accuracy.
+    """
+    if not isinstance(case, dict):
+        return case
+    name = case.get("testCaseName") or ""
+    project_name, flavor, vertical, index = parse_test_case_parts(name)
+    if _blank(case.get("project_name")) and project_name:
+        case["project_name"] = project_name
+    if _blank(case.get("flavor")) and flavor:
+        case["flavor"] = flavor
+    if _blank(case.get("vertical")) and vertical:
+        case["vertical"] = vertical
+    if _blank(case.get("index")) and index is not None:
+        case["index"] = index
+
+    secondary = case.get("secondary_task")
+    if _blank(secondary):
+        secondary = secondary_task_from_vertical(case.get("vertical") or vertical)
+        if secondary:
+            case["secondary_task"] = secondary
+            case.setdefault("_task_source", "name")
+        else:
+            case["_task_source"] = "missing"
+    else:
+        case.setdefault("_task_source", "payload")
+        secondary = str(secondary).strip()
+
+    if secondary:
+        if _blank(case.get("vertical")):
+            case["vertical"] = sanitize_task_token(secondary)
+        if _blank(case.get("primary_task")):
+            case["primary_task"] = primary_task_from_secondary(secondary)
+        if _blank(case.get("metric_name")):
+            case["metric_name"] = metric_name_of(secondary)
+
+    if _blank(case.get("language")):
+        case["language"] = infer_language(case.get("expect"))
+
+    if _blank(case.get("project_name")):
+        case["project_name"] = "LongBench-Pro"
+    if _blank(case.get("flavor")):
+        case["flavor"] = flavor or "lbp"
+    if _blank(case.get("vertical")):
+        case["vertical"] = vertical or ""
+    return case
 
 
 def metric_name_of(secondary_task):
@@ -120,7 +264,7 @@ def normalize_answers(answers):
 
 def normalize_prediction(prediction):
     area = get_answer_area(prediction)
-    return [fix_space(p.strip()) for p in lower(area).split("\n")]
+    return [fix_space(p.strip()) for p in lower(area).split("\n") if p.strip()]
 
 
 def normalize_prediction_lines(prediction):
@@ -185,14 +329,29 @@ def SubEM(answers, prediction):
 
 
 def NDCG(answers, prediction):
+    """Official LongBench-Pro NDCG@k via pytrec_eval semantics (k = len(answers)).
+
+    Graded relevance is the gold rank. Dumping a permutation of the gold IDs
+    (for example 1..n) can still score high; that is the official metric, not
+    a filename/meta join artifact.
+    """
     answers = normalize_answers(answers)
     predictions = normalize_prediction(prediction)
     if not answers or not predictions:
         return 0.0
     k = len(answers)
     rel_map = {a: k - i for i, a in enumerate(answers)}
+    seen = set()
+    ranked = []
+    for pred in predictions:
+        if pred in seen:
+            continue
+        seen.add(pred)
+        ranked.append(pred)
+        if len(ranked) >= k:
+            break
     dcg = 0.0
-    for i, pred in enumerate(predictions[:k], start=1):
+    for i, pred in enumerate(ranked, start=1):
         rel = rel_map.get(pred, 0)
         dcg += rel / math.log2(i + 1)
     idcg = 0.0

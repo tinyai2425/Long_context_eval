@@ -10,7 +10,6 @@ import eval_results
 import extend_metrics
 import extract_name
 import file_utils
-import meta_loader
 import verify_ans
 
 
@@ -55,9 +54,9 @@ if __name__ == "__main__":
     OMC_collect.calculate_token_entropy = extend_metrics.calculate_token_entropy
     OMC_collect.score_case = verify_ans.score_case
     OMC_collect.TEST_CASE_NAME_PATTERN = verify_ans.TEST_CASE_NAME_PATTERN
+    OMC_collect.parse_test_case_name = verify_ans.parse_test_case_name
+    OMC_collect.attach_task_fields = verify_ans.attach_task_fields
     OMC_collect.iter_lines_safely = file_utils.iter_lines_safely
-    OMC_collect.load_eval_meta = meta_loader.load_eval_meta
-    OMC_collect.merge_meta = meta_loader.merge_meta
 
     print(f"[INFO] input txt    : {test_result_path}")
     print(f"[INFO] tokenizer    : {tokenizer_path}")
@@ -72,9 +71,7 @@ if __name__ == "__main__":
     df_results.to_parquet(parquet_path)
     print(f"[SAVE] Results saved to {parquet_path}")
 
-    save_summary_path = (
-        os.path.join(omc_output_dir, "OMC_Summary.xlsx") if show_detail else None
-    )
+    save_summary_path = os.path.join(omc_output_dir, "OMC_Summary.xlsx")
     eval_results.evaluate_reference_results(
         df_results,
         verbal=show_detail,

@@ -103,11 +103,8 @@ def build_messages(prompt):
     return [{"role": "user", "content": prompt}]
 
 
-def eval_meta(
-    test_case_name,
-    expect,
-    extra_meta,
-):
+def case_labels(test_case_name, expect, extra_meta):
+    """Inline scoring labels into GPU/API cases. No sidecar file."""
     meta = {
         "testCaseName": test_case_name,
         "expect": expect,
@@ -131,7 +128,7 @@ def build_gpu_case(sampled, prompt, test_case_name, expect, extra_meta):
     _copy_present(extra, sampled, GPU_EXTRA_BODY_KEYS)
     extra["chat_template_kwargs"] = {"enable_thinking": sampled["enable_thinking"]}
     case["extra_body"] = extra
-    case.update(eval_meta(test_case_name, expect, extra_meta))
+    case.update(case_labels(test_case_name, expect, extra_meta))
     return case
 
 
@@ -147,7 +144,7 @@ def build_api_case(sampled, prompt, test_case_name, expect, extra_meta):
         sampled,
         ("seed", "top_p", "temperature", "presence_penalty", "max_tokens"),
     )
-    case.update(eval_meta(test_case_name, expect, extra_meta))
+    case.update(case_labels(test_case_name, expect, extra_meta))
     return case
 
 

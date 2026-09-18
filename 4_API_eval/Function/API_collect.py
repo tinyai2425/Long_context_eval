@@ -5,7 +5,6 @@
 
 import json
 import math
-import os
 from typing import Dict, List, Union
 
 import pandas as pd
@@ -15,9 +14,8 @@ calculate_repetition_rate = None
 calculate_token_entropy = None
 score_case = None
 parse_test_case_name = None
+attach_task_fields = None
 iter_lines_safely = None
-merge_meta = None
-load_eval_meta = None
 
 
 def _messages_text(messages):
@@ -195,7 +193,6 @@ def parse_llm_api_results(input_path: str) -> pd.DataFrame:
             f"输入文件 {input_path} 行数 ({len(lines)}) 不是 3 的倍数，请检查格式。"
         )
 
-    meta_map = load_eval_meta(os.path.dirname(os.path.abspath(input_path))) if load_eval_meta else {}
     fmt_counts: Dict[str, int] = {}
 
     for i in range(0, len(lines), 3):
@@ -245,8 +242,8 @@ def parse_llm_api_results(input_path: str) -> pd.DataFrame:
         case["decode_time"] = api_total_time
         case["total_time"] = api_total_time
 
-        if merge_meta:
-            merge_meta(case, meta_map)
+        if attach_task_fields:
+            attach_task_fields(case)
 
         score_text = response_text or reasoning
         case["get_ans"] = GET_answer(score_text)

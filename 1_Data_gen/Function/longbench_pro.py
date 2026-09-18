@@ -125,7 +125,6 @@ def generate_cases(project_name, selected, sampled, enable_thinking):
     gpu_cases = []
     api_cases = []
     omc_cases = []
-    meta_rows = []
     max_tokens = int(sampled.get("max_tokens", 5000))
 
     for idx, (item, prompt, n_tokens) in enumerate(selected):
@@ -156,12 +155,4 @@ def generate_cases(project_name, selected, sampled, enable_thinking):
             )
         )
 
-        meta_rows.append(
-            {
-                "testCaseName": test_case_name,
-                "expect": expect,
-                **extra,
-            }
-        )
-
-    return gpu_cases, api_cases, omc_cases, meta_rows
+    return gpu_cases, api_cases, omc_cases

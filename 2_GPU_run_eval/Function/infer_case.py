@@ -115,36 +115,37 @@ def measure_performance(client, model_id, case, timeout=1200):
         response_token_len = len(full_response)
 
     score_text = full_response or reasoning_content
-    passed, metric = verify_ans.verify_case(case, score_text)
+    attached = verify_ans.attach_task_fields(dict(case))
+    passed, metric = verify_ans.verify_case(attached, score_text)
     _, _, prediction = verify_ans.score_case(
-        case.get("secondary_task") or "",
-        case.get("expect"),
+        attached.get("secondary_task") or "",
+        attached.get("expect"),
         score_text,
-        case.get("language") or "",
+        attached.get("language") or "",
     )
     project_name, flavor, vertical = verify_ans.parse_test_case_name(
-        case.get("testCaseName", "")
+        attached.get("testCaseName", "")
     )
 
-    return {
-        "testCaseName": case.get("testCaseName", ""),
+    row = {
+        "testCaseName": attached.get("testCaseName", ""),
         "project_name": project_name,
         "flavor": flavor,
         "vertical": vertical,
-        "index": case.get("index"),
-        "sample_id": case.get("sample_id", ""),
-        "benchmark": case.get("benchmark", "LongBench-Pro"),
-        "language": case.get("language", ""),
-        "token_length": case.get("token_length", ""),
-        "primary_task": case.get("primary_task", ""),
-        "secondary_task": case.get("secondary_task", ""),
-        "contextual_requirement": case.get("contextual_requirement", ""),
-        "difficulty": case.get("difficulty", ""),
-        "metric_name": case.get("metric_name")
-        or verify_ans.metric_name_of(case.get("secondary_task") or ""),
-        "expect": case.get("expect")
-        if isinstance(case.get("expect"), str)
-        else json.dumps(case.get("expect"), ensure_ascii=False),
+        "index": attached.get("index"),
+        "sample_id": attached.get("sample_id", ""),
+        "benchmark": attached.get("benchmark", "LongBench-Pro"),
+        "language": attached.get("language", ""),
+        "token_length": attached.get("token_length", ""),
+        "primary_task": attached.get("primary_task", ""),
+        "secondary_task": attached.get("secondary_task", ""),
+        "contextual_requirement": attached.get("contextual_requirement", ""),
+        "difficulty": attached.get("difficulty", ""),
+        "metric_name": attached.get("metric_name")
+        or verify_ans.metric_name_of(attached.get("secondary_task") or ""),
+        "expect": attached.get("expect")
+        if isinstance(attached.get("expect"), str)
+        else json.dumps(attached.get("expect"), ensure_ascii=False),
         "response": full_response,
         "reasoning_content": reasoning_content,
         "prediction": prediction,
@@ -160,3 +161,4 @@ def measure_performance(client, model_id, case, timeout=1200):
         "entropy": extend_metrics.calculate_char_entropy(score_text),
         "enable_thinking": enable_thinking_of(case),
     }
+    return verify_ans.attach_task_fields(row)

@@ -72,7 +72,6 @@ bash run_gen_longbench.sh
   project-1-LBP-GPU-412.jsonl
   project-1-LBP-API-412.jsonl
   project-1-LBP-OMC-412.json
-  eval_meta.jsonl
   sampling_config.json
   api_config.json
 ```
@@ -132,7 +131,7 @@ bash run_eval_gpu.sh
 
 ## 四、OMC 评测（3_OMC_eval）
 
-把 `*-LBP-OMC-*.json` 放到 OMC 上跑，把日志 txt 拷回 project 目录（与 `eval_meta.jsonl` 同级），然后：
+把 `*-LBP-OMC-*.json` 放到 OMC 上跑，把日志 txt 拷回来即可（不需要 `eval_meta.jsonl`）。然后：
 
 ```bash
 cd 3_OMC_eval

@@ -2,6 +2,8 @@
 
 import pandas as pd
 
+import verify_ans
+
 PRIMARY_ORDER = [
     "T1. Retrieval & Ranking",
     "T2. Sequencing & Structure Reconstruction",
@@ -26,6 +28,12 @@ def _safe_tps(df):
     return df["response_token_len"].sum() / decode_sum
 
 
+def _label(value, default="unknown"):
+    if verify_ans._blank(value):
+        return default
+    return str(value).strip()
+
+
 def _row(df, project_name, flavor, vertical=""):
     metric_mean = df["metric"].mean() if "metric" in df.columns else 0.0
     return {
@@ -48,9 +56,17 @@ def _row(df, project_name, flavor, vertical=""):
     }
 
 
+def _has_values(df, col):
+    if col not in df.columns:
+        return False
+    return df[col].map(lambda v: _label(v, "") != "").any()
+
+
 def _group_rows(df, project_name, key, order=None):
+    work = df.copy()
+    work[key] = work[key].map(_label)
     rows = []
-    grouped = df.groupby(key, dropna=False)
+    grouped = work.groupby(key, dropna=False)
     names = list(grouped.groups.keys())
     if order:
         ordered = [n for n in order if n in grouped.groups]
@@ -64,6 +80,14 @@ def _group_rows(df, project_name, key, order=None):
     return pd.DataFrame(rows)
 
 
+def _prepare_report_df(df):
+    prepared = df.copy()
+    records = []
+    for row in prepared.to_dict(orient="records"):
+        records.append(verify_ans.attach_task_fields(row))
+    return pd.DataFrame(records)
+
+
 def evaluate_reference_results(
     result_get,
     verbal=False,
@@ -71,34 +95,47 @@ def evaluate_reference_results(
     save_writer=None,
     sheet_prefix="",
 ):
-    df_results = result_get.copy()
+    df_results = _prepare_report_df(result_get)
     project_name = "LongBench-Pro"
     if "project_name" in df_results.columns and len(df_results):
-        project_name = df_results["project_name"].iloc[0] or project_name
+        project_name = _label(df_results["project_name"].iloc[0], project_name)
 
     df_summary = pd.DataFrame([_row(df_results, project_name, "overall")])
-    print(f"\n[Summary] {sheet_prefix}")
-    print(df_summary.to_string(index=False))
 
     df_category = None
     df_breakdown = None
     extra_sheets = {}
-    if verbal:
-        if "primary_task" in df_results.columns:
-            print(f"\n[Primary task] {sheet_prefix}")
-            df_category = _group_rows(df_results, project_name, "primary_task", PRIMARY_ORDER)
-            print(df_category.to_string(index=False))
-
-        vertical_key = "secondary_task" if "secondary_task" in df_results.columns else "vertical"
-        print(f"\n[Breakdown / {vertical_key}] {sheet_prefix}")
+    if _has_values(df_results, "primary_task"):
+        df_category = _group_rows(df_results, project_name, "primary_task", PRIMARY_ORDER)
+    vertical_key = None
+    if _has_values(df_results, "secondary_task"):
+        vertical_key = "secondary_task"
+    elif _has_values(df_results, "vertical"):
+        vertical_key = "vertical"
+    if vertical_key:
         df_breakdown = _group_rows(df_results, project_name, vertical_key)
-        print(df_breakdown.to_string(index=False))
+    for dim in ("token_length", "language", "difficulty", "contextual_requirement"):
+        if _has_values(df_results, dim):
+            extra_sheets[dim] = _group_rows(df_results, project_name, dim)
 
-        for dim in ("token_length", "language", "difficulty", "contextual_requirement"):
-            if dim in df_results.columns:
-                extra_sheets[dim] = _group_rows(df_results, project_name, dim)
-                print(f"\n[{dim}] {sheet_prefix}")
-                print(extra_sheets[dim].to_string(index=False))
+    print(f"\n[Summary] {sheet_prefix}")
+    print(df_summary.to_string(index=False))
+
+    if df_category is not None:
+        print(f"\n[Primary task] {sheet_prefix}")
+        print(df_category.to_string(index=False))
+    if df_breakdown is not None:
+        print(f"\n[Breakdown / {vertical_key}] {sheet_prefix}")
+        print(df_breakdown.to_string(index=False))
+    else:
+        print(
+            f"\n[WARN] no vertical breakdown for {sheet_prefix}: "
+            "secondary_task/vertical missing"
+        )
+    if verbal:
+        for dim, table in extra_sheets.items():
+            print(f"\n[{dim}] {sheet_prefix}")
+            print(table.to_string(index=False))
 
     internal_writer = None
     if save_summary_path and save_writer is None:
@@ -113,10 +150,10 @@ def evaluate_reference_results(
 
         df_summary.to_excel(save_writer, sheet_name=summary_sheet, index=False)
         print(f"[Excel] Summary written to sheet: {summary_sheet}")
-        if verbal and df_category is not None:
+        if df_category is not None:
             df_category.to_excel(save_writer, sheet_name=category_sheet, index=False)
             print(f"[Excel] Category written to sheet: {category_sheet}")
-        if verbal and df_breakdown is not None:
+        if df_breakdown is not None:
             df_breakdown.to_excel(save_writer, sheet_name=breakdown_sheet, index=False)
             print(f"[Excel] Breakdown written to sheet: {breakdown_sheet}")
         for dim, table in extra_sheets.items():

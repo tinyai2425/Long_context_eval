@@ -10,7 +10,6 @@
 #   project-N-LBP-GPU-{n}.jsonl
 #   project-N-LBP-API-{n}.jsonl
 #   project-N-LBP-OMC-{n}.json
-#   eval_meta.jsonl
 #   sampling_config.json
 #   api_config.json
 
@@ -221,7 +220,7 @@ if __name__ == "__main__":
         f"max={max(token_lens)} mean={sum(token_lens) / len(token_lens):.1f}"
     )
 
-    gpu_cases, api_cases, omc_cases, meta_rows = longbench_pro.generate_cases(
+    gpu_cases, api_cases, omc_cases = longbench_pro.generate_cases(
         project_name, selected, sampled, enable_thinking
     )
     n = len(gpu_cases)
@@ -233,8 +232,6 @@ if __name__ == "__main__":
     with open(omc_path, "w", encoding="utf-8") as f:
         json.dump(jsonable(omc_cases), f, indent=4, ensure_ascii=False)
     print(f"{len(omc_cases)} OMC test cases saved to {omc_path}")
-
-    write_jsonl(os.path.join(project_path, "eval_meta.jsonl"), meta_rows)
 
     archived = dict(config)
     archived["enable_thinking"] = enable_thinking

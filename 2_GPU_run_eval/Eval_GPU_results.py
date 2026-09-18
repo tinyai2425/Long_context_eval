@@ -81,7 +81,7 @@ if __name__ == "__main__":
     print(f"[INFO] max_workers={max_workers}")
     print(f"[INFO] Output directory: {gpu_output_dir}")
 
-    writer = pd.ExcelWriter(save_summary_path) if show_detail else None
+    writer = pd.ExcelWriter(save_summary_path)
     try:
         for version_num in version_nums:
             print(f"\n[INFO] Processing version {version_num}...")
@@ -97,7 +97,7 @@ if __name__ == "__main__":
             eval_results.evaluate_reference_results(
                 df_results,
                 verbal=show_detail,
-                save_summary_path=save_summary_path if show_detail else None,
+                save_summary_path=save_summary_path,
                 save_writer=writer,
                 sheet_prefix=f"v{version_num}",
             )
@@ -113,7 +113,6 @@ if __name__ == "__main__":
         if writer is not None:
             writer.close()
 
-    if show_detail:
-        write_average_sheet.save_overall_summary(save_summary_path, "summary", mode="GPU")
-        write_average_sheet.save_overall_summary(save_summary_path, "category", mode="GPU")
-        write_average_sheet.save_overall_summary(save_summary_path, "breakdown", mode="GPU")
+    write_average_sheet.save_overall_summary(save_summary_path, "summary", mode="GPU")
+    write_average_sheet.save_overall_summary(save_summary_path, "category", mode="GPU")
+    write_average_sheet.save_overall_summary(save_summary_path, "breakdown", mode="GPU")

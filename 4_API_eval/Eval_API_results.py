@@ -11,7 +11,6 @@ import eval_results
 import extend_metrics
 import extract_name
 import file_utils
-import meta_loader
 import verify_ans
 
 
@@ -54,9 +53,8 @@ if __name__ == "__main__":
     API_collect.calculate_token_entropy = extend_metrics.calculate_token_entropy
     API_collect.score_case = verify_ans.score_case
     API_collect.parse_test_case_name = verify_ans.parse_test_case_name
+    API_collect.attach_task_fields = verify_ans.attach_task_fields
     API_collect.iter_lines_safely = file_utils.iter_lines_safely
-    API_collect.load_eval_meta = meta_loader.load_eval_meta
-    API_collect.merge_meta = meta_loader.merge_meta
 
     print(f"[INFO] input txt    : {test_result_path}")
     print(f"[INFO] output dir   : {api_output_dir}")
@@ -70,9 +68,7 @@ if __name__ == "__main__":
     df_results.to_parquet(parquet_path)
     print(f"[SAVE] Results saved to {parquet_path}")
 
-    save_summary_path = (
-        os.path.join(api_output_dir, "API_Summary.xlsx") if show_detail else None
-    )
+    save_summary_path = os.path.join(api_output_dir, "API_Summary.xlsx")
     eval_results.evaluate_reference_results(
         df_results,
         verbal=show_detail,
