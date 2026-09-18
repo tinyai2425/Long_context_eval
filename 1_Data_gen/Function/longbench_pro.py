@@ -130,7 +130,11 @@ def generate_cases(project_name, selected, sampled, enable_thinking):
     for idx, (item, prompt, n_tokens) in enumerate(selected):
         secondary = item.get("secondary_task") or "unknown"
         vertical = case_builder.sanitize_token(secondary)
-        test_case_name = f"{project_name}-lbp-test-{vertical}-{idx}"
+        length_key = str(item.get("token_length") or "").strip().lower()
+        if length_key not in BUCKET_TO_TOKENS:
+            digits = "".join(ch for ch in length_key if ch.isdigit())
+            length_key = f"{digits}k" if f"{digits}k" in BUCKET_TO_TOKENS else "unk"
+        test_case_name = f"{project_name}-lbp-test-{vertical}-{length_key}-{idx}"
         expect = case_builder.expect_list(item.get("answer"))
         metric_name = TASK_METRIC_CONFIG.get(secondary, "Accuracy")
         extra = extra_meta(item, n_tokens, metric_name)

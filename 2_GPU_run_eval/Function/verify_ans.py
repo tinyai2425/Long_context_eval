@@ -51,7 +51,7 @@ PRIMARY_TASK_BY_CODE = {
     "T11": "T11. Dialogue Memory & Long-Horizon Tracking",
 }
 
-# 生成侧是 `{project}-lbp-test-{vertical}-{idx}`。project 前缀允许任意字符
+# 生成侧是 `{project}-lbp-test-{vertical}-{8k|16k}-{idx}`。project 前缀允许任意字符
 # （含点号、改过的序号），评分身份只用 flavor-test-vertical-idx。
 TEST_CASE_NAME_PATTERN = re.compile(
     r"^(?P<project_name>.+)-(?P<flavor>[A-Za-z0-9_]+)-test-"
@@ -60,6 +60,10 @@ TEST_CASE_NAME_PATTERN = re.compile(
 TEST_CASE_NAME_FALLBACK = re.compile(
     r"(?:^|-)test-(?P<vertical>.+)-(?P<index>\d+)$"
 )
+
+LENGTH_BUCKETS = ("8k", "16k", "32k", "64k", "128k", "256k")
+LENGTH_BUCKET_ORDER = list(LENGTH_BUCKETS)
+LENGTH_BUCKET_TOKENS = (8192, 16384, 32768, 65536, 131072, 262144)
 
 THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 SUMMARY_PASS_THRESHOLD = 0.65
@@ -98,34 +102,74 @@ def init_embedding(path):
     return True
 
 
-def parse_test_case_parts(name):
-    """Split `{project}-{flavor}-test-{vertical}-{index}`.
+def normalize_length_bucket(value):
+    text = str(value or "").strip().lower().replace(" ", "")
+    if text in LENGTH_BUCKETS:
+        return text
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if digits:
+        key = f"{digits}k"
+        if key in LENGTH_BUCKETS:
+            return key
+    return ""
 
-    project 可以是 `project-1`、`project-2`、`Qwen3.5-4B` 等；评分不依赖它。
+
+def split_length_from_vertical(vertical):
+    text = str(vertical or "")
+    lower = text.lower()
+    for bucket in LENGTH_BUCKETS:
+        suffix = "-" + bucket
+        if lower.endswith(suffix):
+            return text[: -len(suffix)], bucket
+    return text, ""
+
+
+def token_length_from_prompt_len(n_tokens):
+    try:
+        n = float(n_tokens)
+    except (TypeError, ValueError):
+        return ""
+    if n != n or n <= 0:
+        return ""
+    sizes = LENGTH_BUCKET_TOKENS
+    for i, size in enumerate(sizes):
+        nxt = sizes[i + 1] if i + 1 < len(sizes) else None
+        if nxt is None or n <= (size + nxt) / 2:
+            return LENGTH_BUCKETS[i]
+    return LENGTH_BUCKETS[-1]
+
+
+def parse_test_case_parts(name):
+    """Split `{project}-{flavor}-test-{vertical}-{8k|16k}-{index}`.
+
+    Older names omit the length bucket. project 不参与评分。
     """
     text = str(name or "").strip()
     matched = TEST_CASE_NAME_PATTERN.match(text)
     if matched:
+        vertical, length = split_length_from_vertical(matched.group("vertical"))
         return (
             matched.group("project_name"),
             matched.group("flavor"),
-            matched.group("vertical"),
+            vertical,
             int(matched.group("index")),
+            length,
         )
     fallback = TEST_CASE_NAME_FALLBACK.search(text)
     if fallback:
-        return "", "", fallback.group("vertical"), int(fallback.group("index"))
-    return "", "", "", None
+        vertical, length = split_length_from_vertical(fallback.group("vertical"))
+        return "", "", vertical, int(fallback.group("index")), length
+    return "", "", "", None, ""
 
 
 def parse_test_case_name(name):
-    project_name, flavor, vertical, _index = parse_test_case_parts(name)
+    project_name, flavor, vertical, _index, _length = parse_test_case_parts(name)
     return project_name, flavor, vertical
 
 
 def canonical_case_key(name):
-    """Stable identity: flavor-test-vertical-idx, ignoring the project prefix."""
-    project_name, flavor, vertical, index = parse_test_case_parts(name)
+    """Stable identity: flavor-test-vertical-idx, ignoring project prefix and length."""
+    project_name, flavor, vertical, index, _length = parse_test_case_parts(name)
     if vertical and index is not None:
         return f"{(flavor or 'lbp').lower()}-test-{vertical}-{index}".lower()
     text = str(name or "").strip().lower()
@@ -179,7 +223,7 @@ def attach_task_fields(case):
     if not isinstance(case, dict):
         return case
     name = case.get("testCaseName") or ""
-    project_name, flavor, vertical, index = parse_test_case_parts(name)
+    project_name, flavor, vertical, index, length_from_name = parse_test_case_parts(name)
     if _blank(case.get("project_name")) and project_name:
         case["project_name"] = project_name
     if _blank(case.get("flavor")) and flavor:
@@ -188,6 +232,17 @@ def attach_task_fields(case):
         case["vertical"] = vertical
     if _blank(case.get("index")) and index is not None:
         case["index"] = index
+
+    if not _blank(case.get("token_length")):
+        norm = normalize_length_bucket(case.get("token_length"))
+        if norm:
+            case["token_length"] = norm
+    if _blank(case.get("token_length")) and length_from_name:
+        case["token_length"] = length_from_name
+    if _blank(case.get("token_length")):
+        inferred = token_length_from_prompt_len(case.get("prompt_token_len"))
+        if inferred:
+            case["token_length"] = inferred
 
     secondary = case.get("secondary_task")
     if _blank(secondary):

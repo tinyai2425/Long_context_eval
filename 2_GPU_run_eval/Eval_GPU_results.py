@@ -116,3 +116,4 @@ if __name__ == "__main__":
     write_average_sheet.save_overall_summary(save_summary_path, "summary", mode="GPU")
     write_average_sheet.save_overall_summary(save_summary_path, "category", mode="GPU")
     write_average_sheet.save_overall_summary(save_summary_path, "breakdown", mode="GPU")
+    write_average_sheet.save_overall_summary(save_summary_path, "token_length", mode="GPU")

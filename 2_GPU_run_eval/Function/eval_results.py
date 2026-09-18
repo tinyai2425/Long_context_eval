@@ -102,9 +102,13 @@ def evaluate_reference_results(
 
     df_summary = pd.DataFrame([_row(df_results, project_name, "overall")])
 
+    extra_sheets = {}
+    if _has_values(df_results, "token_length"):
+        extra_sheets["token_length"] = _group_rows(
+            df_results, project_name, "token_length", verify_ans.LENGTH_BUCKET_ORDER
+        )
     df_category = None
     df_breakdown = None
-    extra_sheets = {}
     if _has_values(df_results, "primary_task"):
         df_category = _group_rows(df_results, project_name, "primary_task", PRIMARY_ORDER)
     vertical_key = None
@@ -114,12 +118,21 @@ def evaluate_reference_results(
         vertical_key = "vertical"
     if vertical_key:
         df_breakdown = _group_rows(df_results, project_name, vertical_key)
-    for dim in ("token_length", "language", "difficulty", "contextual_requirement"):
+    for dim in ("language", "difficulty", "contextual_requirement"):
         if _has_values(df_results, dim):
             extra_sheets[dim] = _group_rows(df_results, project_name, dim)
 
     print(f"\n[Summary] {sheet_prefix}")
     print(df_summary.to_string(index=False))
+
+    if "token_length" in extra_sheets:
+        print(f"\n[token_length / 8k-16k] {sheet_prefix}")
+        print(extra_sheets["token_length"].to_string(index=False))
+    else:
+        print(
+            f"\n[WARN] no token_length breakdown for {sheet_prefix}: "
+            "8k/16k labels missing"
+        )
 
     if df_category is not None:
         print(f"\n[Primary task] {sheet_prefix}")
@@ -134,6 +147,8 @@ def evaluate_reference_results(
         )
     if verbal:
         for dim, table in extra_sheets.items():
+            if dim == "token_length":
+                continue
             print(f"\n[{dim}] {sheet_prefix}")
             print(table.to_string(index=False))
 
