@@ -15,7 +15,7 @@ import verify_ans
 
 USAGE = (
     "Usage: python Eval_OMC_results.py <tokenizer_path> <test_result_path> "
-    "[--show_detail] [--embedding_model PATH]"
+    "[--show_detail] [--embedding_model PATH] [--official_metrics]"
 )
 
 
@@ -36,14 +36,22 @@ def parse_args():
     test_result_path = sys.argv[2]
     show_detail = "--show_detail" in sys.argv
     embedding_model = _flag_val("--embedding_model")
-    return tokenizer_path, test_result_path, show_detail, embedding_model
+    official = "--official_metrics" in sys.argv
+    return tokenizer_path, test_result_path, show_detail, embedding_model, official
 
 
 if __name__ == "__main__":
-    tokenizer_path, test_result_path, show_detail, embedding_model = parse_args()
+    (
+        tokenizer_path,
+        test_result_path,
+        show_detail,
+        embedding_model,
+        official,
+    ) = parse_args()
     if not os.path.isfile(test_result_path):
         raise FileNotFoundError(test_result_path)
 
+    verify_ans.set_overgen_penalty(not official)
     verify_ans.init_embedding(embedding_model)
     project_base, file_name = extract_name.parse_project_base_and_filename(test_result_path)
     omc_output_dir = extract_name.make_dated_output_dir(project_base, "OMC", dataset="LBP")
@@ -61,6 +69,10 @@ if __name__ == "__main__":
     print(f"[INFO] input txt    : {test_result_path}")
     print(f"[INFO] tokenizer    : {tokenizer_path}")
     print(f"[INFO] output dir   : {omc_output_dir}")
+    print(
+        "[INFO] overgen 稀释 : "
+        + ("off（官方口径）" if official else "on（NDCG/SubEM 按 k/n_pred 稀释）")
+    )
 
     df_results = OMC_collect.parse_llm_test_results(test_result_path)
     if len(df_results) == 0:

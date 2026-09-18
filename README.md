@@ -185,6 +185,21 @@ bash run_eval_api.sh
 - **category** sheet：11 个 primary_task
 - **breakdown** sheet：25 个 secondary_task（vertical）
 - 另有 token_length / language / difficulty / contextual_requirement
+- `pred lines` / `gold lines` / `dump>2x`：答案行数、gold 行数、以及行数超 gold 两倍的样本占比。
+  量化模型掉分主要掉在"把 1..N 全打出来"，SCORE 上只差一两分，看 `dump>2x` 才看得出来。
+
+### 与官方 `modules/utils.py` 的三处差异
+
+1. **紧贴中文的空格照删**。官方只有 `fix_space`（压缩连续空格）。但两条链路都会把中文写成
+   `2024 年 3 月 31 日` / `句 5` / `文档 A 第三十二条`，gold 是 `2024年3月31日` / `句5`，
+   按行精确匹配会整格判 0（实测 T8.1 上 GPU 20 题全 0）。只在空白至少一侧是 CJK 时删，
+   纯 ASCII 之间的空格（`A 38%`、官方注释里的 `1 11` vs `11 1`）保持原样。
+2. **纯字母答案忽略分隔符**：`G/H` → `gh`，对齐 gold 的 `GH`。带数字的一律不动。
+3. **NDCG / SubEM 按 `k / n_pred` 稀释**：官方 NDCG@k 忽略多余行，把 1..N 全打出来能拿 ~0.8，
+   比短而准的答案还高。三个评估脚本都支持 `--official_metrics` 关掉这一项，拿与官方
+   leaderboard 可比的数；日志里会打印当前用的是哪一档。
+
+前两项只会把被格式坑掉的正确答案捞回来（实测两条链路各恢复十几条，没有任何一条分数变低）。
 
 ## 七、换模型
 

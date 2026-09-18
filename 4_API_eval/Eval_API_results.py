@@ -16,7 +16,7 @@ import verify_ans
 
 USAGE = (
     "Usage: python Eval_API_results.py <test_result_txt> "
-    "[--show_detail] [--embedding_model PATH]"
+    "[--show_detail] [--embedding_model PATH] [--official_metrics]"
 )
 
 
@@ -36,14 +36,16 @@ def parse_args():
     test_result_path = sys.argv[1]
     show_detail = "--show_detail" in sys.argv
     embedding_model = _flag_val("--embedding_model")
-    return test_result_path, show_detail, embedding_model
+    official = "--official_metrics" in sys.argv
+    return test_result_path, show_detail, embedding_model, official
 
 
 if __name__ == "__main__":
-    test_result_path, show_detail, embedding_model = parse_args()
+    test_result_path, show_detail, embedding_model, official = parse_args()
     if not os.path.isfile(test_result_path):
         raise FileNotFoundError(test_result_path)
 
+    verify_ans.set_overgen_penalty(not official)
     verify_ans.init_embedding(embedding_model)
     project_base, file_name = extract_name.parse_project_base_and_filename(test_result_path)
     api_output_dir = extract_name.make_dated_output_dir(project_base, "API", dataset="LBP")

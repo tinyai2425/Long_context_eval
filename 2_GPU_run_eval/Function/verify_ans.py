@@ -68,6 +68,18 @@ LENGTH_BUCKET_TOKENS = (8192, 16384, 32768, 65536, 131072, 262144)
 THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 SUMMARY_PASS_THRESHOLD = 0.65
 
+CJK_RANGES = "\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af"
+CJK_CHAR = re.compile("[" + CJK_RANGES + "]")
+CJK_SPACE = re.compile(r"(?<=[" + CJK_RANGES + r"])\s+|\s+(?=[" + CJK_RANGES + r"])")
+LETTER_LIST = re.compile(r"^[a-z](?:[\s/、,，|\\]+[a-z])+$")
+LETTER_SEP = re.compile(r"[\s/、,，|\\]+")
+CJK_LANG_RATIO = 0.05
+LANG_SNIFF_CHARS = 4000
+
+# 官方 NDCG@k / SubEM 忽略多余行，量化模型把 1..N 全打出来反而比短而准的答案高分。
+# 默认按 k/n_pred 稀释；想拿与官方 leaderboard 可比的数就关掉。
+OVERGEN_PENALTY = True
+
 _embedding_model = None
 _embedding_enabled = False
 
@@ -207,9 +219,23 @@ def _blank(value):
     return text == "" or text.lower() in ("nan", "none", "<na>")
 
 
+def set_overgen_penalty(enabled):
+    global OVERGEN_PENALTY
+    OVERGEN_PENALTY = bool(enabled)
+
+
 def infer_language(*texts):
-    blob = " ".join(str(t or "") for t in texts)
-    if re.search(r"[\u4e00-\u9fff]", blob):
+    """按 CJK 字符占比判语种。
+
+    只看 expect 会把 gold 是 `["2","5"]` / `["C"]` 的中文题判成 English
+    （500 条里 128 条），language breakdown 和 Summary 的 jieba 分词都会错。
+    所以调用方要把 prompt / response 一起传进来。
+    """
+    blob = "".join(str(t or "")[:LANG_SNIFF_CHARS] for t in texts)
+    blob = re.sub(r"\s+", "", blob)
+    if not blob:
+        return "English"
+    if len(CJK_CHAR.findall(blob)) / len(blob) > CJK_LANG_RATIO:
         return "Chinese"
     return "English"
 
@@ -265,7 +291,9 @@ def attach_task_fields(case):
             case["metric_name"] = metric_name_of(secondary)
 
     if _blank(case.get("language")):
-        case["language"] = infer_language(case.get("expect"))
+        case["language"] = infer_language(
+            case.get("prompt"), case.get("expect"), case.get("response")
+        )
 
     if _blank(case.get("project_name")):
         case["project_name"] = "LongBench-Pro"
@@ -313,13 +341,41 @@ def fix_space(text):
     return " ".join(text.split())
 
 
+def drop_cjk_space(text):
+    """删掉紧贴 CJK 字符的空白。
+
+    官方只有 `fix_space`（压缩连续空格），并提醒不能无条件删空格，
+    因为 "1 11" != "11 1"。但 GPU 和 OMC 两条链路都会把中文写成
+    `2024 年 3 月 31 日` / `句 5` / `文档 A 第三十二条`，gold 是
+    `2024年3月31日` / `句5` / `文档A第三十二条`，按行精确匹配整格判 0
+    （T8.1 上 GPU 20 题全 0）。只在空白至少一侧是 CJK 时删除，
+    纯 ASCII 之间的空格（`A 38%`、`1 11`）保持原样。
+    """
+    return CJK_SPACE.sub("", text)
+
+
+def fold_letter_separators(text):
+    """`g/h`、`a、c、d` 归一成 `gh`、`acd`，对齐 gold 的 `GH` / `ACD`。
+
+    只处理纯字母列表；带数字的一律不动，避免 "1 11" 和 "11 1" 撞车。
+    """
+    if LETTER_LIST.match(text):
+        return LETTER_SEP.sub("", text)
+    return text
+
+
+def normalize_text(text):
+    return fold_letter_separators(drop_cjk_space(fix_space(lower(str(text)).strip())))
+
+
 def normalize_answers(answers):
-    return [fix_space(lower(str(a)).strip()) for a in answers]
+    return [normalize_text(a) for a in answers]
 
 
 def normalize_prediction(prediction):
     area = get_answer_area(prediction)
-    return [fix_space(p.strip()) for p in lower(area).split("\n") if p.strip()]
+    lines = (normalize_text(p) for p in area.split("\n"))
+    return [p for p in lines if p]
 
 
 def normalize_prediction_lines(prediction):
@@ -390,7 +446,11 @@ def overgen_scale(n_gold, n_pred_lines):
     Official NDCG@k / SubEM ignore extra lines (or treat them as recall-only),
     so a quantized run that prints 1..N can beat a short, well-ranked GPU
     answer. Scale by n_gold / n_pred when n_pred > n_gold, i.e. list precision.
+
+    设 OVERGEN_PENALTY=False 可退回官方口径。
     """
+    if not OVERGEN_PENALTY:
+        return 1.0
     if n_gold <= 0 or n_pred_lines <= n_gold:
         return 1.0
     return n_gold / float(n_pred_lines)
@@ -488,7 +548,7 @@ def _summary_max_semantic(answers, prediction):
 
 def Summary(answers, prediction, is_zh, alpha=0.5, beta=0.5):
     answers = normalize_answers(answers)
-    prediction = fix_space(lower(get_answer_area(prediction)).strip())
+    prediction = normalize_text(get_answer_area(prediction))
     if not answers or not prediction:
         return 0.0
     rouge_l = _summary_max_rouge_l(answers, prediction, is_zh)

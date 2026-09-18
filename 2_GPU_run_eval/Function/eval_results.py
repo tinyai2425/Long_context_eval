@@ -34,8 +34,31 @@ def _label(value, default="unknown"):
     return str(value).strip()
 
 
+def _gold_lines(df):
+    if "expect" not in df.columns:
+        return None
+    return df["expect"].map(lambda e: len(verify_ans.parse_expect(e)))
+
+
+def _dump_rate(df):
+    """答案行数超过 gold 两倍的样本占比。
+
+    量化后掉的主要是这个：同一题 GPU 输出 10 行、OMC 把 1..N 全打出来。
+    SCORE 只差一两分看不出来，这一列能看出来。
+    """
+    gold = _gold_lines(df)
+    if gold is None or "n_pred_lines" not in df.columns:
+        return 0.0
+    valid = gold > 0
+    if not valid.any():
+        return 0.0
+    over = df.loc[valid, "n_pred_lines"] > 2 * gold[valid]
+    return round(over.mean(), 4)
+
+
 def _row(df, project_name, flavor, vertical=""):
     metric_mean = df["metric"].mean() if "metric" in df.columns else 0.0
+    gold = _gold_lines(df)
     return {
         "Project": project_name,
         "Flavor": flavor,
@@ -46,6 +69,8 @@ def _row(df, project_name, flavor, vertical=""):
         "pred lines": round(df["n_pred_lines"].mean(), 2)
         if "n_pred_lines" in df.columns
         else 0.0,
+        "gold lines": round(gold.mean(), 2) if gold is not None else 0.0,
+        "dump>2x": _dump_rate(df),
         "get_ans": round(df["get_ans"].mean(), 2) if "get_ans" in df.columns else 0.0,
         "rp>0.1": round((df["repeat"] > 0.1).mean(), 4),
         "rp@99%": round(df["repeat"].quantile(0.99), 5),

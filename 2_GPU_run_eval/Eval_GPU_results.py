@@ -18,7 +18,7 @@ import write_average_sheet
 USAGE = (
     "Usage: python Eval_GPU_results.py "
     "<gpu_jsonl_path> <ip> <port> <model_id> <version_flag> "
-    "[--show_detail] [--max_workers N] [--embedding_model PATH]"
+    "[--show_detail] [--max_workers N] [--embedding_model PATH] [--official_metrics]"
 )
 
 
@@ -43,7 +43,18 @@ def parse_args():
     show_detail = "--show_detail" in sys.argv
     max_workers = int(_flag_val("--max_workers") or 2)
     embedding_model = _flag_val("--embedding_model")
-    return jsonl_path, ip, port, model_id, version_flag, show_detail, max_workers, embedding_model
+    official = "--official_metrics" in sys.argv
+    return (
+        jsonl_path,
+        ip,
+        port,
+        model_id,
+        version_flag,
+        show_detail,
+        max_workers,
+        embedding_model,
+        official,
+    )
 
 
 def get_version_nums(version_flag):
@@ -62,10 +73,12 @@ if __name__ == "__main__":
         show_detail,
         max_workers,
         embedding_model,
+        official,
     ) = parse_args()
     if not os.path.isfile(jsonl_path):
         raise FileNotFoundError(jsonl_path)
 
+    verify_ans.set_overgen_penalty(not official)
     verify_ans.init_embedding(embedding_model)
     infer_case.verify_ans = verify_ans
     infer_case.extend_metrics = extend_metrics
@@ -79,6 +92,10 @@ if __name__ == "__main__":
     print(f"[INFO] jsonl: {jsonl_path}")
     print(f"[INFO] vLLM endpoint: http://{ip}:{port}/v1, model={model_id}")
     print(f"[INFO] max_workers={max_workers}")
+    print(
+        "[INFO] overgen 稀释: "
+        + ("off（官方口径）" if official else "on（NDCG/SubEM 按 k/n_pred 稀释）")
+    )
     print(f"[INFO] Output directory: {gpu_output_dir}")
 
     writer = pd.ExcelWriter(save_summary_path)
