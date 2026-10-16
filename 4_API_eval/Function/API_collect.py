@@ -1,4 +1,9 @@
-"""Parse HarmonyOS curl logs: request JSON / response / API_total_time.
+"""Parse API logs into the shared LongBench score frame.
+
+每题两种写法都接受：
+
+- 3 行：请求 JSON、压成一行的响应、``API_total_time: <秒>``
+- 2 行：请求 JSON、压成一行的响应（没有计时，TTFT / TPS 留空）
 
 请求行是 API jsonl（messages 为 role/user）。响应可能是完整 JSON 或压成一行的 SSE。
 """
@@ -185,20 +190,47 @@ def _extract_response_fields(resp):
     return "", "", None, None
 
 
+def _group_api_records(lines):
+    """Pair each request with its response, and a timing line when present."""
+    records = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        req_line = lines[i]
+        if req_line.startswith("API_total_time"):
+            raise ValueError(
+                f"API_total_time appears before a request/response pair "
+                f"(record {len(records) + 1})"
+            )
+        if i + 1 >= n:
+            raise ValueError(f"request {len(records) + 1} has no response line")
+        resp_line = lines[i + 1]
+        if resp_line.startswith("API_total_time"):
+            raise ValueError(
+                f"request {len(records) + 1} is followed by API_total_time "
+                "and has no response line"
+            )
+        time_line = None
+        step = 2
+        if i + 2 < n and lines[i + 2].startswith("API_total_time"):
+            time_line = lines[i + 2]
+            step = 3
+        records.append((req_line, resp_line, time_line))
+        i += step
+    return records
+
+
 def parse_llm_api_results(input_path: str) -> pd.DataFrame:
     results: List[Dict[str, Union[str, float, int]]] = []
     lines = [line.strip() for line in iter_lines_safely(input_path) if line.strip()]
-    if len(lines) % 3 != 0:
-        raise ValueError(
-            f"输入文件 {input_path} 行数 ({len(lines)}) 不是 3 的倍数，请检查格式。"
-        )
+    records = _group_api_records(lines)
 
     fmt_counts: Dict[str, int] = {}
+    n_timed = 0
 
-    for i in range(0, len(lines), 3):
-        req_line = json.loads(lines[i])
-        resp_line = coerce_response(lines[i + 1])
-        api_time_line = lines[i + 2]
+    for req_text, resp_text, api_time_line in records:
+        req_line = json.loads(req_text)
+        resp_line = coerce_response(resp_text)
 
         case: Dict[str, Union[str, float, int]] = {}
         case["testCaseName"] = req_line.get("testCaseName", "")
@@ -237,10 +269,15 @@ def parse_llm_api_results(input_path: str) -> pd.DataFrame:
         else:
             case["response_token_len"] = len(response_text)
 
-        api_total_time = float(str(api_time_line).replace("API_total_time:", "").strip())
         case["first_token_time"] = math.nan
-        case["decode_time"] = api_total_time
-        case["total_time"] = api_total_time
+        if api_time_line:
+            api_total_time = float(str(api_time_line).replace("API_total_time:", "").strip())
+            case["decode_time"] = api_total_time
+            case["total_time"] = api_total_time
+            n_timed += 1
+        else:
+            case["decode_time"] = math.nan
+            case["total_time"] = math.nan
 
         if attach_task_fields:
             attach_task_fields(case)
@@ -267,6 +304,7 @@ def parse_llm_api_results(input_path: str) -> pd.DataFrame:
         results.append(case)
 
     print(f"{len(results)} tests processed in results {input_path}")
+    print(f"[INFO] timed cases: {n_timed}/{len(results)}")
     if fmt_counts:
         fmt_summary = ", ".join(f"{k}={v}" for k, v in fmt_counts.items())
         print(f"[INFO] response formats detected: {fmt_summary}")

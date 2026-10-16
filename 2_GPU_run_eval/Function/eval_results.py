@@ -20,11 +20,20 @@ PRIMARY_ORDER = [
 
 
 def _safe_tps(df):
-    decode_sum = df["decode_time"].dropna().sum()
+    decode = df["decode_time"].dropna()
+    decode_sum = float(decode.sum()) if len(decode) else 0.0
     if decode_sum <= 0:
-        total = df["total_time"].sum()
-        ftt = df["first_token_time"].dropna().sum()
-        decode_sum = max(1e-5, total - ftt)
+        total = df["total_time"].dropna() if "total_time" in df.columns else decode.iloc[0:0]
+        total_sum = float(total.sum()) if len(total) else 0.0
+        if total_sum <= 0:
+            return float("nan")
+        ftt = (
+            df["first_token_time"].dropna()
+            if "first_token_time" in df.columns
+            else total.iloc[0:0]
+        )
+        ftt_sum = float(ftt.sum()) if len(ftt) else 0.0
+        decode_sum = max(1e-5, total_sum - ftt_sum)
     return df["response_token_len"].sum() / decode_sum
 
 
