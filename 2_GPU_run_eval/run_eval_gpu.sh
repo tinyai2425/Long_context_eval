@@ -4,6 +4,9 @@ INPUT_JSONL="../../model-eval-storage/Qwen3.5-4B/project-1/project-1-LBP-GPU-xxx
 VLLM_IP="127.0.0.1"
 VLLM_PORT=8895
 VLLM_MODEL_ID="qwen35_4b"
+# 一次进程里连跑几轮。再启动一次会续写进当天同一个 GPU-LBP-日期 目录，
+# 已有 GPU-Results-1.parquet 时下一轮是 2，最后对全部轮次求平均。
+# 第 N 轮的 seed = jsonl 里的 seed + (N-1)，避免多轮打出同一份结果。
 VERSION_FLAG=1
 MAX_WORKERS=2
 SHOW_DETAIL="true"

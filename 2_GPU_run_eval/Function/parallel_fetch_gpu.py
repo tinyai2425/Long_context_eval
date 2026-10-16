@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import time
@@ -47,7 +48,20 @@ def _error_result(case, exc):
         "repeat": 0.0,
         "entropy": 0.0,
         "enable_thinking": False,
+        "run_id": case.get("run_id"),
     })
+
+
+def case_for_version(case, version_num):
+    """第 1 轮用 jsonl 里的 seed，之后每轮 +1，避免多轮打出同一份结果。"""
+    updated = copy.deepcopy(case)
+    try:
+        base_seed = int(updated.get("seed") or 0)
+    except (TypeError, ValueError):
+        base_seed = 0
+    updated["seed"] = base_seed + int(version_num) - 1
+    updated["run_id"] = int(version_num)
+    return updated
 
 
 def parallel_fetch_reference_model(
@@ -57,16 +71,21 @@ def parallel_fetch_reference_model(
     model_id,
     max_workers=2,
     timeout=1200,
+    version_num=1,
 ):
     client = openai.OpenAI(
         base_url=f"http://{server_ip}:{server_port}/v1",
         api_key="no-api-key-needed",
         timeout=timeout,
     )
-    cases = infer_case.load_jsonl(jsonl_path)
+    cases = [case_for_version(case, version_num) for case in infer_case.load_jsonl(jsonl_path)]
     total = len(cases)
     if total == 0:
         raise ValueError(f"No samples found in {jsonl_path}")
+    print(
+        f"[INFO] version {version_num} seed={cases[0].get('seed')} "
+        f"({total} cases)"
+    )
 
     max_workers = max(1, int(max_workers))
     start_time = time.time()

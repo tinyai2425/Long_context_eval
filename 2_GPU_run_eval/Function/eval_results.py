@@ -99,6 +99,41 @@ def _has_values(df, col):
     return df[col].map(lambda v: _label(v, "") != "").any()
 
 
+def _cross_length_rows(df, project_name, task_col, order=None):
+    """One row per task × token_length. Flavor is the task, Vertical is 8k/16k."""
+    if task_col not in df.columns or "token_length" not in df.columns:
+        return None
+    work = df.copy()
+    work[task_col] = work[task_col].map(_label)
+    work["token_length"] = work["token_length"].map(
+        lambda value: verify_ans.normalize_length_bucket(value) or _label(value, "")
+    )
+    work = work[work["token_length"] != ""]
+    if work.empty or not _has_values(work, task_col):
+        return None
+
+    lengths = [b for b in verify_ans.LENGTH_BUCKET_ORDER if (work["token_length"] == b).any()]
+    lengths += [x for x in work["token_length"].unique() if x not in lengths]
+    grouped = work.groupby(task_col, dropna=False)
+    tasks = list(grouped.groups.keys())
+    if order:
+        ordered = [name for name in order if name in grouped.groups]
+        tasks = ordered + [name for name in tasks if name not in ordered]
+
+    rows = []
+    for task in tasks:
+        for length in lengths:
+            sub = work[(work[task_col] == task) & (work["token_length"] == length)]
+            if sub.empty:
+                continue
+            row = _row(sub, project_name, str(task), str(length))
+            row["样本数"] = len(sub)
+            rows.append(row)
+    if not rows:
+        return None
+    return pd.DataFrame(rows)
+
+
 def _group_rows(df, project_name, key, order=None):
     work = df.copy()
     work[key] = work[key].map(_label)
@@ -133,11 +168,17 @@ def evaluate_reference_results(
     sheet_prefix="",
 ):
     df_results = _prepare_report_df(result_get)
+    if "n_pred_lines" not in df_results.columns and "prediction" in df_results.columns:
+        df_results["n_pred_lines"] = df_results["prediction"].fillna("").map(
+            lambda text: len([ln for ln in str(text).splitlines() if str(ln).strip()])
+        )
     project_name = "LongBench-Pro"
     if "project_name" in df_results.columns and len(df_results):
         project_name = _label(df_results["project_name"].iloc[0], project_name)
 
-    df_summary = pd.DataFrame([_row(df_results, project_name, "overall")])
+    df_summary = pd.DataFrame(
+        [_row(df_results, project_name, "overall", "overall")]
+    )
 
     extra_sheets = {}
     if _has_values(df_results, "token_length"):
@@ -155,6 +196,14 @@ def evaluate_reference_results(
         vertical_key = "vertical"
     if vertical_key:
         df_breakdown = _group_rows(df_results, project_name, vertical_key)
+    if _has_values(df_results, "token_length") and _has_values(df_results, "primary_task"):
+        extra_sheets["cat_x_len"] = _cross_length_rows(
+            df_results, project_name, "primary_task", PRIMARY_ORDER
+        )
+    if vertical_key and _has_values(df_results, "token_length"):
+        extra_sheets["task_x_len"] = _cross_length_rows(
+            df_results, project_name, vertical_key
+        )
     for dim in ("language", "difficulty", "contextual_requirement"):
         if _has_values(df_results, dim):
             extra_sheets[dim] = _group_rows(df_results, project_name, dim)
@@ -177,6 +226,9 @@ def evaluate_reference_results(
     if df_breakdown is not None:
         print(f"\n[Breakdown / {vertical_key}] {sheet_prefix}")
         print(df_breakdown.to_string(index=False))
+        if extra_sheets.get("task_x_len") is not None:
+            print(f"\n[Breakdown x token_length] {sheet_prefix}")
+            print(extra_sheets["task_x_len"].to_string(index=False))
     else:
         print(
             f"\n[WARN] no vertical breakdown for {sheet_prefix}: "
@@ -209,6 +261,8 @@ def evaluate_reference_results(
             df_breakdown.to_excel(save_writer, sheet_name=breakdown_sheet, index=False)
             print(f"[Excel] Breakdown written to sheet: {breakdown_sheet}")
         for dim, table in extra_sheets.items():
+            if table is None or len(table) == 0:
+                continue
             sheet = (dim[: 31 - len(suffix)] + suffix)[:31]
             table.to_excel(save_writer, sheet_name=sheet, index=False)
             print(f"[Excel] {dim} written to sheet: {sheet}")

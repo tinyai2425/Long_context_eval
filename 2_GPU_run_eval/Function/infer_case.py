@@ -163,5 +163,6 @@ def measure_performance(client, model_id, case, timeout=1200):
         "repeat": extend_metrics.calculate_repetition_rate(score_text),
         "entropy": extend_metrics.calculate_char_entropy(score_text),
         "enable_thinking": enable_thinking_of(case),
+        "run_id": case.get("run_id"),
     }
     return verify_ans.attach_task_fields(row)

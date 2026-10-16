@@ -1,4 +1,6 @@
+import datetime
 import os
+import re
 import sys
 
 import pandas as pd
@@ -57,10 +59,60 @@ def parse_args():
     )
 
 
-def get_version_nums(version_flag):
-    if version_flag < 1:
-        raise ValueError("version_flag must be >= 1")
-    return list(range(1, version_flag + 1))
+def resolve_gpu_output(project_base, extra_runs):
+    """当天的结果进同一个 GPU-LBP-日期 目录，多次启动接着往后续号。
+
+    以前每次启动都新建 GPU-LBP-日期-2，目录里永远只有 GPU-Results-1.parquet，
+    10 次运行不会被平均到一起。
+    """
+    date_str = datetime.date.today().strftime("%Y%m%d")
+    gpu_output_dir = os.path.join(project_base, f"GPU-LBP-{date_str}")
+    os.makedirs(gpu_output_dir, exist_ok=True)
+    existing = []
+    for name in os.listdir(gpu_output_dir):
+        matched = re.fullmatch(r"GPU-Results-(\d+)\.parquet", name)
+        if matched:
+            existing.append(int(matched.group(1)))
+    start = max(existing) + 1 if existing else 1
+    version_nums = list(range(start, start + extra_runs))
+    return gpu_output_dir, sorted(existing), version_nums
+
+
+def rebuild_workbook(gpu_output_dir, save_summary_path, show_detail):
+    paths = []
+    for name in os.listdir(gpu_output_dir):
+        matched = re.fullmatch(r"GPU-Results-(\d+)\.parquet", name)
+        if matched:
+            paths.append((int(matched.group(1)), os.path.join(gpu_output_dir, name)))
+    paths.sort()
+    if not paths:
+        print(f"[WARN] no GPU-Results parquet in {gpu_output_dir}")
+        return
+
+    writer = pd.ExcelWriter(save_summary_path, mode="w", engine="openpyxl")
+    try:
+        for version_num, path in paths:
+            print(f"[INFO] report version {version_num} from {os.path.basename(path)}")
+            df_results = pd.read_parquet(path)
+            eval_results.evaluate_reference_results(
+                df_results,
+                verbal=show_detail,
+                save_summary_path=save_summary_path,
+                save_writer=writer,
+                sheet_prefix=f"v{version_num}",
+            )
+    finally:
+        writer.close()
+
+    for prefix in (
+        "summary",
+        "category",
+        "breakdown",
+        "token_length",
+        "cat_x_len",
+        "task_x_len",
+    ):
+        write_average_sheet.save_overall_summary(save_summary_path, prefix, mode="GPU")
 
 
 if __name__ == "__main__":
@@ -84,8 +136,7 @@ if __name__ == "__main__":
     infer_case.extend_metrics = extend_metrics
 
     project_base, file_name = extract_name.parse_project_base_and_filename(jsonl_path)
-    version_nums = get_version_nums(version_flag)
-    gpu_output_dir = extract_name.make_dated_output_dir(project_base, "GPU", dataset="LBP")
+    gpu_output_dir, already, version_nums = resolve_gpu_output(project_base, version_flag)
     save_summary_path = os.path.join(gpu_output_dir, "GPU_Summary.xlsx")
 
     print("Notice: Proxy settings should be disabled before proceeding.")
@@ -97,40 +148,33 @@ if __name__ == "__main__":
         + ("off（官方口径）" if official else "on（NDCG/SubEM 按 k/n_pred 稀释）")
     )
     print(f"[INFO] Output directory: {gpu_output_dir}")
+    print(
+        f"[INFO] already saved versions: {already or 'none'}; "
+        f"this launch adds {version_nums}"
+    )
 
-    writer = pd.ExcelWriter(save_summary_path)
-    try:
-        for version_num in version_nums:
-            print(f"\n[INFO] Processing version {version_num}...")
-            ref_result_parquet_path = os.path.join(
-                gpu_output_dir, f"GPU-Results-{version_num}.parquet"
-            )
-            df_results = parallel_fetch_gpu.parallel_fetch_reference_model(
-                jsonl_path, ip, port, model_id, max_workers=max_workers
-            )
-            df_results.to_parquet(ref_result_parquet_path)
-            print(f"[SAVE] Results saved to {ref_result_parquet_path}")
-
-            eval_results.evaluate_reference_results(
+    for version_num in version_nums:
+        print(f"\n[INFO] Processing version {version_num}...")
+        ref_result_parquet_path = os.path.join(
+            gpu_output_dir, f"GPU-Results-{version_num}.parquet"
+        )
+        df_results = parallel_fetch_gpu.parallel_fetch_reference_model(
+            jsonl_path,
+            ip,
+            port,
+            model_id,
+            max_workers=max_workers,
+            version_num=version_num,
+        )
+        df_results.to_parquet(ref_result_parquet_path)
+        print(f"[SAVE] Results saved to {ref_result_parquet_path}")
+        if show_detail:
+            anlz_cont_quality.analyze_entropy_and_repeat(
                 df_results,
-                verbal=show_detail,
-                save_summary_path=save_summary_path,
-                save_writer=writer,
-                sheet_prefix=f"v{version_num}",
+                save_fig_path=os.path.join(
+                    gpu_output_dir, f"analysis_v{version_num}.png"
+                ),
             )
-            if show_detail:
-                anlz_cont_quality.analyze_entropy_and_repeat(
-                    df_results,
-                    save_fig_path=os.path.join(
-                        gpu_output_dir, f"analysis_v{version_num}.png"
-                    ),
-                )
-            print(f"[DONE] Evaluation for version {version_num}")
-    finally:
-        if writer is not None:
-            writer.close()
+        print(f"[DONE] Evaluation for version {version_num}")
 
-    write_average_sheet.save_overall_summary(save_summary_path, "summary", mode="GPU")
-    write_average_sheet.save_overall_summary(save_summary_path, "category", mode="GPU")
-    write_average_sheet.save_overall_summary(save_summary_path, "breakdown", mode="GPU")
-    write_average_sheet.save_overall_summary(save_summary_path, "token_length", mode="GPU")
+    rebuild_workbook(gpu_output_dir, save_summary_path, show_detail)
